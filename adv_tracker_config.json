@@ -4,13 +4,13 @@
     "geometry": {
         "width": 10,
         "height": 323,
-        "x": 52,
-        "y": 236
+        "x": 0,
+        "y": 0
     },
     "appearance": {
-        "bar_color_1": "#00C9FF",
-        "bar_color_2": "#92FE9D",
-        "background_color": "#2D3436",
+        "bar_color_1": "#fc7821",
+        "bar_color_2": "#00FFFF",
+        "background_color": "#2B2B2B",
         "text_color": "#FFFFFF",
         "completed_color": "#00FF00",
         "opacity": "0.7957055214723926",

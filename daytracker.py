@@ -42,7 +42,7 @@ class ConfigManager:
     DEFAULT_CONFIG = {
         "start_time": "09:00",
         "end_time": "17:30",
-        "geometry": {"width": 35, "height": 250, "x": 150, "y": 150},
+        "geometry": {"width": 10, "height": 250, "x": 150, "y": 150},
         "appearance": {
             "bar_color_1": "#1E90FF", "bar_color_2": "#00FFFF",
             "background_color": "#2B2B2B", "text_color": "#FFFFFF",
@@ -472,8 +472,8 @@ class SettingsWindow(tk.Toplevel):
         except (ValueError, IndexError):
             return False
 
-    def _on_save(self): self.master.config_manager.save_config(); self.destroy()
-    def _on_close(self): self.master.config_manager.config = self.temp_config; self.master.apply_config(); self.destroy()
+    def _on_save(self): self.master.config_manager.save_config(); self.master.attributes("-topmost", True); self.destroy()
+    def _on_close(self): self.master.config_manager.config = self.temp_config; self.master.apply_config(); self.master.attributes("-topmost", True); self.destroy()
 
     def center_window(self):
         self.update_idletasks(); mx, my, mw = self.master.winfo_x(), self.master.winfo_y(), self.master.winfo_width()
