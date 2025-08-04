@@ -2,7 +2,8 @@
 
 DayTracker is a highly customizable, always-on-top desktop widget that provides a visual representation of your workday's progress. It's designed to be a simple, unobtrusive tool to help you stay aware of your schedule at a glance.
 
-![image](https://github.com/user-attachments/assets/e2552587-3161-489c-85f3-79832387832b)
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/3fdb9bab-5d03-41da-a236-d3ff0ebe0785" />
+
 
 
 ## Features
