@@ -11,6 +11,7 @@ import time
 import json
 import os
 import copy
+import math
 
 # --- Configuration Management ---
 class ConfigManager:
@@ -47,7 +48,13 @@ class ConfigManager:
             "bar_color_1": "#1E90FF", "bar_color_2": "#00FFFF",
             "background_color": "#2B2B2B", "text_color": "#FFFFFF",
             "completed_color": "#00FF00", "opacity": 0.9, "corner_radius": 15,
-            "theme": "Default"
+            "theme": "Default",
+            "timer": {
+                "ring_width": 12,
+                "bar_color_1": "#FF4500",
+                "bar_color_2": "#FFD700",
+                "background_color": "#444444"
+            }
         },
         "behavior": {
             "update_interval_seconds": 5, "display_mode": "Percentage",
@@ -117,6 +124,8 @@ class TimeProgressBar(tk.Tk):
         self.canvas.pack(fill="both", expand=True)
         self.label = tk.Label(self, bg="#000001", fg="white", font=("Segoe UI", 9, "bold"))
 
+        self.active_timers = [] # List to hold multiple timer windows
+
         self._create_context_menu(); self._bind_events(); self.apply_config()
         threading.Thread(target=self._update_loop, daemon=True).start()
 
@@ -126,6 +135,8 @@ class TimeProgressBar(tk.Tk):
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Start Break", command=self._start_break)
         self.context_menu.add_command(label="End Break", command=self._end_break, state="disabled")
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Start Timer", command=self.open_timer_setter)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Quit", command=self.quit)
 
@@ -278,6 +289,11 @@ class TimeProgressBar(tk.Tk):
             self.settings_window = SettingsWindow(self, self.config_manager)
         self.settings_window.lift()
 
+    def open_timer_setter(self):
+        if not hasattr(self, 'setter_window') or not self.setter_window.winfo_exists():
+            self.setter_window = TimerSetterWindow(self, self.config_manager)
+        self.setter_window.lift()
+
     def _on_press(self, e): self.drag_info = {'x':self.winfo_x(), 'y':self.winfo_y(), 'mx':e.x_root, 'my':e.y_root}
     def _on_drag(self, e):
         if self.drag_info and not self.config_manager.get('behavior.auto_position'):
@@ -303,59 +319,275 @@ class TimeProgressBar(tk.Tk):
             self.context_menu.entryconfig("End Break", state="disabled")
             del self.break_start_time
 
+# --- Timer Setter Window ---
+class TimerSetterWindow(tk.Toplevel):
+    def __init__(self, master, config_manager):
+        super().__init__(master)
+        self.master = master
+        self.config_manager = config_manager
+        self.title("Set Timer")
+        self.transient(master)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+        self.minutes_var = tk.StringVar(value="15")
+        self.seconds_var = tk.StringVar(value="0")
+
+        main_frame = ttk.Frame(self, padding=15)
+        main_frame.pack(expand=True, fill="both")
+
+        ttk.Label(main_frame, text="Set Timer Duration").pack(pady=(0, 10))
+
+        input_frame = ttk.Frame(main_frame)
+        input_frame.pack(pady=5)
+
+        ttk.Label(input_frame, text="Minutes:").grid(row=0, column=0, padx=5, sticky="w")
+        ttk.Entry(input_frame, textvariable=self.minutes_var, width=7).grid(row=0, column=1, padx=5)
+
+        ttk.Label(input_frame, text="Seconds:").grid(row=1, column=0, padx=5, sticky="w")
+        ttk.Entry(input_frame, textvariable=self.seconds_var, width=7).grid(row=1, column=1, padx=5)
+
+        ttk.Button(main_frame, text="Start Timer", command=self._start_timer).pack(pady=(15, 0))
+
+        self.center_window()
+
+    def _start_timer(self):
+        try:
+            minutes = int(self.minutes_var.get() or 0)
+            seconds = int(self.seconds_var.get() or 0)
+            total_seconds = (minutes * 60) + seconds
+
+            if total_seconds > 0:
+                # Position the new timer under the last active one, or near the master
+                last_y = self.master.winfo_y()
+                if self.master.active_timers:
+                    last_y = self.master.active_timers[-1].winfo_y() + self.master.active_timers[-1].winfo_height() + 10
+
+                new_timer = CircularTimerWindow(self.master, self.config_manager, total_seconds, last_y)
+                self.master.active_timers.append(new_timer)
+                new_timer.lift()
+                self.master.attributes("-topmost", True)
+                self.destroy()
+            else:
+                messagebox.showerror("Invalid Input", "Please enter a total duration greater than zero.", parent=self)
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please enter valid numbers for minutes and seconds.", parent=self)
+
+    def center_window(self):
+        self.update_idletasks()
+        mx, my, mw, mh = self.master.winfo_x(), self.master.winfo_y(), self.master.winfo_width(), self.master.winfo_height()
+        ww, wh = self.winfo_width(), self.winfo_height()
+        x = mx + (mw // 2) - (ww // 2)
+        y = my + (mh // 2) - (wh // 2)
+        self.geometry(f'250x150+{x}+{y}')
+
+
+# --- Circular Timer Window ---
+class CircularTimerWindow(tk.Toplevel):
+    def __init__(self, master, config_manager, duration_seconds, y_pos):
+        super().__init__(master)
+        self.master = master
+        self.config_manager = config_manager
+        self.duration = duration_seconds
+        self.remaining_seconds = duration_seconds
+        self.animation_job = None
+        self.drag_info = {}
+
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.attributes("-transparentcolor", "black")
+        self.configure(bg="black")
+
+        geo = self.config_manager.get('geometry')
+        screen_w = self.winfo_screenwidth()
+        x = geo['x'] + geo['width'] + 20
+        y = y_pos
+        if x + 100 > screen_w: # 100 is the window width
+            x = geo['x'] - 100 - 20
+        self.geometry(f"100x100+{x}+{y}")
+
+        self.canvas = tk.Canvas(self, bg="black", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+
+        self.label = tk.Label(self, bg="#000001", fg="white", font=("Segoe UI", 12, "bold"))
+        self.label.place(relx=0.5, rely=0.5, anchor="center")
+
+        self._bind_events()
+        self.apply_config()
+        self._update_timer()
+
+    def _bind_events(self):
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<B1-Motion>", self._on_drag)
+        self.bind("<Button-3>", self._close_timer) # Right-click to close
+
+    def _on_press(self, e): self.drag_info = {'x': self.winfo_x(), 'y': self.winfo_y(), 'mx': e.x_root, 'my': e.y_root}
+    def _on_drag(self, e):
+        if self.drag_info:
+            self.geometry(f"+{self.drag_info['x'] + (e.x_root - self.drag_info['mx'])}+{self.drag_info['y'] + (e.y_root - self.drag_info['my'])}")
+    
+    def _close_timer(self, e=None):
+        if self.animation_job:
+            self.after_cancel(self.animation_job)
+        self.animation_job = None
+        if self in self.master.active_timers:
+            self.master.active_timers.remove(self)
+        self.destroy()
+
+    def apply_config(self):
+        app = self.config_manager.get('appearance')
+        timer_app = self.config_manager.get('appearance.timer')
+        self.attributes("-alpha", app['opacity'])
+        self.label.configure(fg=app['text_color'], bg="#000001")
+        self.attributes("-transparentcolor", "#000001")
+        self._redraw_canvas()
+
+    def _update_timer(self):
+        if self.remaining_seconds > 0:
+            self._redraw_canvas()
+            self.remaining_seconds -= 1
+            self.animation_job = self.after(1000, self._update_timer)
+        else:
+            self.label.config(text="Done!")
+            if self.animation_job:
+                self.after_cancel(self.animation_job)
+            self.animation_job = None
+            self._flash_and_close()
+
+    def _flash_and_close(self, count=6): # Flash 3 times (on/off)
+        if count > 0:
+            current_alpha = self.attributes('-alpha')
+            new_alpha = 0.5 if current_alpha > 0.8 else 1.0
+            self.attributes('-alpha', new_alpha)
+            self.after(250, lambda: self._flash_and_close(count - 1))
+        else:
+            self._close_timer()
+
+    def _redraw_canvas(self):
+        self.canvas.delete("all")
+        w, h = self.winfo_width(), self.winfo_height()
+        if w <= 1 or h <= 1: return
+
+        bg_color = self.config_manager.get('appearance.timer.background_color')
+        c1 = self.config_manager.get('appearance.timer.bar_color_1')
+        c2 = self.config_manager.get('appearance.timer.bar_color_2')
+        ring_width = self.config_manager.get('appearance.timer.ring_width')
+
+        self.canvas.config(bg=self.attributes("-transparentcolor"))
+
+        self.canvas.create_arc(
+            ring_width//2, ring_width//2, w-(ring_width//2), h-(ring_width//2),
+            start=0, extent=360, style=tk.ARC, width=ring_width-2, outline=bg_color
+        )
+
+        percentage_remaining = self.remaining_seconds / self.duration if self.duration > 0 else 0
+        self._create_gradient_arc(w/2, h/2, min(w,h)/2 - ring_width/2, ring_width, percentage_remaining, c1, c2)
+
+        m, s = divmod(self.remaining_seconds, 60)
+        self.label.config(text=f"{int(m):02d}:{int(s):02d}")
+
+    def _create_gradient_arc(self, cx, cy, radius, width, percentage, c1, c2):
+        try:
+            c1_rgb = self.winfo_rgb(c1)
+            c2_rgb = self.winfo_rgb(c2)
+        except tk.TclError:
+            return
+
+        total_steps = int(360 * percentage)
+        if total_steps <= 0: return
+
+        for i in range(total_steps):
+            angle = i - 90 # Start from top
+            rad = math.radians(angle)
+            
+            ratio = i / 360.0
+            r = int(c1_rgb[0] * (1 - ratio) + c2_rgb[0] * ratio)
+            g = int(c1_rgb[1] * (1 - ratio) + c2_rgb[1] * ratio)
+            b = int(c1_rgb[2] * (1 - ratio) + c2_rgb[2] * ratio)
+            color = f'#{r:04x}{g:04x}{b:04x}'
+
+            x = cx + radius * math.cos(rad)
+            y = cy + radius * math.sin(rad)
+            self.canvas.create_oval(x-width/2, y-width/2, x+width/2, y+width/2, fill=color, outline=color)
+
+
 # --- Settings Window ---
 class SettingsWindow(tk.Toplevel):
     def __init__(self, master, config_manager):
-        super().__init__(master); self.master = master
-        self.config_manager = config_manager; self.temp_config = copy.deepcopy(config_manager.config)
-        self.title("Settings"); self.transient(master); self.grab_set()
+        super().__init__(master)
+        self.master = master
+        self.config_manager = config_manager
+        self.temp_config = copy.deepcopy(config_manager.config)
+        self.title("Settings")
+        self.transient(master)
+        self.grab_set()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.vars = {}; self._create_widgets(); self.center_window()
+        self.vars = {}
+        self._create_widgets()
+        self.update_idletasks()
+        self.center_window()
 
     def _create_widgets(self):
-        main_frame = ttk.Frame(self, padding=15); main_frame.pack(expand=True, fill="both")
+        main_frame = ttk.Frame(self, padding=15)
+        main_frame.pack(expand=True, fill="both")
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1) # Create two equally weighted columns
+
+        # --- Column Frames ---
+        left_column = ttk.Frame(main_frame)
+        left_column.grid(row=0, column=0, sticky="new", padx=(0, 10))
+        right_column = ttk.Frame(main_frame)
+        right_column.grid(row=0, column=1, sticky="new", padx=(10, 0))
+
+        # --- Create & Place Sections ---
+        day_lf = ttk.LabelFrame(left_column, text="Day Definition", padding=10)
+        day_lf.pack(fill="x", pady=5, expand=True)
         
-        # --- Create Sections ---
-        day_lf = ttk.LabelFrame(main_frame, text="Day Definition", padding=10)
-        day_lf.grid(row=0, column=0, columnspan=2, sticky="ew", pady=5)
-        
-        geo_lf = ttk.LabelFrame(main_frame, text="Size & Position", padding=10)
-        geo_lf.grid(row=1, column=0, columnspan=2, sticky="ew", pady=5)
+        geo_lf = ttk.LabelFrame(left_column, text="Size & Position", padding=10)
+        geo_lf.pack(fill="x", pady=5, expand=True)
 
-        app_lf = ttk.LabelFrame(main_frame, text="Appearance", padding=10)
-        app_lf.grid(row=2, column=0, columnspan=2, sticky="ew", pady=5)
+        app_lf = ttk.LabelFrame(right_column, text="Appearance", padding=10)
+        app_lf.pack(fill="x", pady=5, expand=True)
 
-        beh_lf = ttk.LabelFrame(main_frame, text="Behavior", padding=10)
-        beh_lf.grid(row=3, column=0, columnspan=2, sticky="ew", pady=5)
+        beh_lf = ttk.LabelFrame(right_column, text="Behavior", padding=10)
+        beh_lf.pack(fill="x", pady=5, expand=True)
 
-        # --- Populate Sections ---
+        # --- Populate "Day Definition" ---
         self._create_combobox(day_lf, "Mode", "behavior.day_definition_mode", 0, ["Start Time & End Time", "Start Time & Duration"], self._toggle_day_controls)
         self._create_entry(day_lf, "Start Time (HH:MM)", "start_time", 1, validate_time=True)
         self.end_time_row = self._create_entry(day_lf, "End Time (HH:MM)", "end_time", 2, validate_time=True)
         self.duration_row = self._create_spin_slider(day_lf, "Duration", "behavior.duration_hours", 3, 1, 48, 0.5, "hrs")
 
+        # --- Populate "Size & Position" ---
         self.width_row = self._create_spin_slider(geo_lf, "Width", "geometry.width", 0, 10, 500, 1, "px")
         self.height_row = self._create_spin_slider(geo_lf, "Height", "geometry.height", 1, 50, 1000, 1, "px")
         self._create_checkbox(geo_lf, "Auto-Position", "behavior.auto_position", 2, self._toggle_geo_controls)
-
+        
+        # --- Populate "Appearance" ---
         self._create_combobox(app_lf, "Theme", "appearance.theme", 0, list(self.config_manager.THEMES.keys()), self._apply_theme)
         self._create_color_picker(app_lf, "Bar Start Color", "appearance.bar_color_1", 1)
-        self._create_color_picker(app_lf, "Bar End Color (Gradient)", "appearance.bar_color_2", 2)
+        self._create_color_picker(app_lf, "Bar End Color", "appearance.bar_color_2", 2)
         self._create_color_picker(app_lf, "Completed Color", "appearance.completed_color", 3)
         self._create_color_picker(app_lf, "Background Color", "appearance.background_color", 4)
         self._create_color_picker(app_lf, "Text Color", "appearance.text_color", 5)
         self.radius_row = self._create_spin_slider(app_lf, "Corner Radius", "appearance.corner_radius", 6, 0, 100, 1, "px")
         self.opacity_row = self._create_spin_slider(app_lf, "Opacity", "appearance.opacity", 7, 0.1, 1.0, 0.05, "")
+        self._create_spin_slider(app_lf, "Timer Ring Width", "appearance.timer.ring_width", 8, 1, 50, 1, "px")
+        self._create_color_picker(app_lf, "Timer Bar Start", "appearance.timer.bar_color_1", 9)
+        self._create_color_picker(app_lf, "Timer Bar End", "appearance.timer.bar_color_2", 10)
+        self._create_color_picker(app_lf, "Timer Background", "appearance.timer.background_color", 11)
         
-        self._create_combobox(beh_lf, "Display Text Mode", "behavior.display_mode", 0, ["Percentage", "Time Remaining", "End Time"])
-        # NEW: Checkbox for showing/hiding the text label
+        # --- Populate "Behavior" ---
+        self._create_combobox(beh_lf, "Display Text", "behavior.display_mode", 0, ["Percentage", "Time Remaining", "End Time"])
         self._create_checkbox(beh_lf, "Show Text Label", "behavior.show_text_label", 1)
 
         # --- Buttons ---
         btn_frame = ttk.Frame(main_frame, padding=(0, 10, 0, 0))
-        btn_frame.grid(row=4, column=0, columnspan=2, sticky="e")
+        btn_frame.grid(row=1, column=0, columnspan=2, sticky="e")
         ttk.Button(btn_frame, text="Save & Close", command=self._on_save).pack(side="right", padx=5)
         ttk.Button(btn_frame, text="Cancel", command=self._on_close).pack(side="right")
+        
+        # --- Finalize initial state of controls ---
         self._toggle_day_controls()
         self._toggle_geo_controls()
 
@@ -371,11 +603,10 @@ class SettingsWindow(tk.Toplevel):
     def _toggle_geo_controls(self, event=None):
         auto_on = self.vars['behavior.auto_position'].get()
         state = "disabled" if auto_on else "normal"
+        # Only disable the height controls, since width is still used in auto-mode
         for w in self.height_row:
-            # Check if the widget is a ttk.Scale or ttk.Spinbox to set its state
             if isinstance(w, (ttk.Scale, ttk.Spinbox, ttk.Entry)):
                 w.configure(state=state)
-            # For the containing frame, we don't disable it, just its children
             elif isinstance(w, ttk.Frame):
                  for child in w.winfo_children():
                       child.configure(state=state)
@@ -476,10 +707,17 @@ class SettingsWindow(tk.Toplevel):
     def _on_close(self): self.master.config_manager.config = self.temp_config; self.master.apply_config(); self.master.attributes("-topmost", True); self.destroy()
 
     def center_window(self):
-        self.update_idletasks(); mx, my, mw = self.master.winfo_x(), self.master.winfo_y(), self.master.winfo_width()
-        ww, wh = self.winfo_width(), self.winfo_height(); x, y = mx + mw + 10, my
-        if x + ww > self.winfo_screenwidth(): x = mx - ww - 10
-        if x < 0: x = 10
+        self.update_idletasks()
+        self.resizable(False, False) # Prevent resizing now that layout is fixed
+        mx, my, mw = self.master.winfo_x(), self.master.winfo_y(), self.master.winfo_width()
+        ww, wh = self.winfo_width(), self.winfo_height()
+        x, y = mx + mw + 10, my
+        # Check if it goes off-screen to the right, and if so, place it on the left
+        if x + ww > self.winfo_screenwidth(): 
+            x = mx - ww - 10
+        # Check if it goes off-screen to the left, and if so, place it at the edge
+        if x < 0: 
+            x = 10
         self.geometry(f'+{x}+{y}')
 
 if __name__ == "__main__":
