@@ -1,0 +1,28 @@
+{
+    "start_time": "18:00",
+    "end_time": "17:30",
+    "geometry": {
+        "width": 10,
+        "height": 323,
+        "x": 52,
+        "y": 236
+    },
+    "appearance": {
+        "bar_color_1": "#00C9FF",
+        "bar_color_2": "#92FE9D",
+        "background_color": "#2D3436",
+        "text_color": "#FFFFFF",
+        "completed_color": "#00FF00",
+        "opacity": "0.7957055214723926",
+        "corner_radius": 0,
+        "theme": "Default"
+    },
+    "behavior": {
+        "update_interval_seconds": 5,
+        "display_mode": "Percentage",
+        "day_definition_mode": "Start Time & Duration",
+        "duration_hours": 16.0,
+        "show_text_label": false,
+        "auto_position": true
+    }
+}
