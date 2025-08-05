@@ -559,7 +559,7 @@ class SettingsWindow(tk.Toplevel):
         self.duration_row = self._create_spin_slider(day_lf, "Duration", "behavior.duration_hours", 3, 1, 48, 0.5, "hrs")
 
         # --- Populate "Size & Position" ---
-        self.width_row = self._create_spin_slider(geo_lf, "Width", "geometry.width", 0, 10, 500, 1, "px")
+        self.width_row = self._create_spin_slider(geo_lf, "Width", "geometry.width", 0, 4, 500, 1, "px")
         self.height_row = self._create_spin_slider(geo_lf, "Height", "geometry.height", 1, 50, 1000, 1, "px")
         self._create_checkbox(geo_lf, "Auto-Position", "behavior.auto_position", 2, self._toggle_geo_controls)
         
